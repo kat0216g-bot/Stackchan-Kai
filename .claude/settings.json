@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python d:/Make/StackChan-kai/stackchan_notify.py --event done --port COM3",
+            "timeout": 10,
+            "statusMessage": "スタックチャンに完了を通知中..."
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python d:/Make/StackChan-kai/stackchan_notify.py --event ask --port COM3",
+            "timeout": 10,
+            "statusMessage": "スタックチャンに確認待ちを通知中..."
+          }
+        ]
+      }
+    ]
+  }
+}
