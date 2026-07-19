@@ -239,6 +239,25 @@ python d:\Make\StackChan-kai\stackchan_notify.py --event ask    --port COM3
 
 ---
 
+## STEP 5(B) 完了 & 次回の改善タスク（2026-07-19）
+
+- プロジェクトの `.claude/settings.json` に hooks 設定（Stop→done / Notification→ask）。
+  Claude Code再起動後、実機で自動通知の発火を確認 = **通知ロボ稼働**。
+
+### 次回の改善要望（ユーザー指示・未着手）
+1. **セリフの表示時間を延ばす**: `stackchan_notify.py` の `EVENTS` の `duration` を調整
+   （現 done=5000ms → 8000〜10000ms 程度）。ファーム改修不要・すぐ可能。
+2. **セリフが消えたら顔を標準(Neutral)に戻す**: 現状はセリフのみ `duration` 後に消え、表情は残る。
+   `.ino` の速度クリア処理（`clearSpeechText()` 付近）で、クリア時に `avatar.setExpression(Expression::Neutral)`
+   も呼ぶよう改修が必要（要 再コンパイル&書き込み）。
+
+### その後の発展候補
+- **A展開**: グローバル `~/.claude/settings.json` に同hookを入れ全プロジェクトで通知。
+- **エラー通知(Sad)追加**: TODO4（どのイベントで拾うか）を調査して error を組み込む。
+- **首の動き**: `.ino` にモーション追加（第2段階）。
+
+---
+
 ## 段階的構築の全体像（再掲）
 
 1. hooks が発火することを確認（まず echo 等で）
