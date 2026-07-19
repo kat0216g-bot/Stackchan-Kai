@@ -137,11 +137,56 @@ python control_stackchan.py --port COM3 --expression Happy --speech "終わっ�
 
 ## 未確定・PCで確定させること（TODO）
 
-- [ ] `control_stackchan.py` の実際のポート指定箇所と引数仕様
-- [ ] `.ino` で使える `expression` 値の正確な一覧
+- [x] `control_stackchan.py` の実際のポート指定箇所と引数仕様 → **`--port`で引数化済み。改変不要**（下記STEP 0-1調査結果を参照）
+- [x] `.ino` で使える `expression` 値の正確な一覧 → **Happy/Angry/Sad/Doubt/Sleepy/Neutral の6種**
 - [ ] Claude Code hooks の最新イベント仕様（stdinで渡るJSONの中身）
 - [ ] エラー系イベントをどのフックで拾うか
-- [ ] うなずき/首かしげ/ブンブンの動作が既存実装にあるか、自作が必要か
+- [x] うなずき/首かしげ/ブンブンの動作が既存実装にあるか、自作が必要か → **未実装。自作が必要**（サーボ制御は無効化されている）
+
+---
+
+## STEP 0-1 現物コード調査結果（2026-07-19 実施）
+
+ベースファーム `Murasan201/M5Core2_StackChan_AI_Extension` をクローンし現物を精査した結果。
+（対象: `control_stackchan.py` と `M5Core2_SG90_StackChan_VoiceText_Ataru.ino`）
+
+### 確定できたこと
+
+- **ポート指定**: `control_stackchan.py` は既に `--port` 引数化済み（デフォルト `/dev/ttyUSB0`）。
+  Windowsでは実行時に `--port COM3` を渡すだけでよく、**コード改変は不要**。
+- **expression の一覧**: `Happy` / `Angry` / `Sad` / `Doubt` / `Sleepy` / `Neutral` の6種。
+  Python側（`EXPRESSION_CHOICES`）・.ino側（`parseExpression`）の両方で一致。
+  → 通知イベント対応表の Happy / Doubt / Sad は**全て対応済み**。表情＋セリフ通知はファーム改変なしで実現可能。
+
+### 首の動き（重要）
+
+- サーボ制御タスク `servoloop()` は冒頭で `return;` により**無効化**されている。
+  `addTask(servoloop, ...)` もコメントアウト済み。
+- しかも既存の `servoloop` は「アバターの視線追従」用であって**通知動作ではない**。
+- JSONコマンドに首を動かすキーは**存在しない**（`expression`/`speech`/`face`/`palette`/`duration`/`clear` のみ）。
+- **結論**: うなずき/首かしげ/ブンブンは、.ino に**モーション用キー（例 `motion`）とサーボ動作関数を自作追加**する必要がある。
+  → まず表情＋セリフで通知ロボを完成させ、首の動きは第2段階として後付けするのが妥当。
+
+### 追加で判明した落とし穴（当初mdに無かった注意点）
+
+- **face/palette は 2 以外を送るとクラッシュの恐れ**:
+  setup内で `faces[0]/[1]`（Ataru/Ram）と `cps[0]/[1]` がコメントアウトされ未初期化。
+  `--face 0/1` や `--palette 0/1` を送るとnullポインタ参照になる。
+  → **face/palette は送らない、または 2 固定にする**（デフォルト顔=`faces[2]`のStackChan）。
+  ※ hooks例の `--palette 2` は 2 なのでOKだが、不要なら省略が安全。
+- **音は鳴らない**: `M5.Speaker.begin()` がコメントアウト＋`USE_VOICE_TEXT` 無効。
+  「セリフ」＝**画面の吹き出しテキスト表示**であって音声ではない。
+- **送信のたびに約3秒の遅延**: Pythonが送信前に `time.sleep(3)` を入れている
+  （Core2がUSB接続時にDTRでリセットするため）。hook発火のたびに約3秒待つ。通知用途なら許容範囲。
+  ACKタイムアウトは1秒（`OK`/`ERR` を待つ）。
+- **Y軸サーボ角度の矛盾に注意**: 本メモは「Y軸5〜85°」としているが、コードの初期値は
+  `START_DEGREE_VALUE_Y 90`。うなずき自作時にこの安全域と要すり合わせ（極端な角度はサーボ故障）。
+
+### 次にやること
+
+- TODO 3・4（Claude Code hooks の最新イベント仕様、エラーイベントの拾い方）はファーム側では確定不可。
+  別途 hooks 仕様の調査が必要。
+- 実機があれば STEP 2〜4（pyserial導入 → Arduino IDE書き込み → 手打ち動作確認）へ進める。
 
 ---
 
