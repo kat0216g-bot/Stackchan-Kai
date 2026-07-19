@@ -1,3 +1,7 @@
 # ベースファームは別リポジトリ(Murasan201/M5Core2_StackChan_AI_Extension)の
 # 作業用クローン。この通知ロボ用リポジトリには含めない。
 base_firmware/
+
+# Python
+__pycache__/
+*.pyc

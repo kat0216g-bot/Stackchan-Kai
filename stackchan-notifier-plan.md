@@ -190,6 +190,55 @@ python control_stackchan.py --port COM3 --expression Happy --speech "終わっ�
 
 ---
 
+## STEP 2-4 実機セットアップ完了（2026-07-19 実施）
+
+実機（M5Core2）をPCへ接続し、ファーム書き込み〜手打ち動作確認まで完了。**表情＋日本語セリフの通知が実機で動作**。
+
+### 確定した環境情報
+- **接続**: USB-シリアルチップは **CH9102（WCH社）**。ポートは **COM3**。
+  （M5Core2は世代でチップが異なり、旧型のCP210x=Silicon Labsではなかった）
+- **Python**: 3.11.9 / `pip install pyserial` 済み（pyserial 3.5）。
+- **ビルド環境**: `arduino-cli` 1.5.1 を winget で導入（`C:\Program Files\Arduino CLI\`）。
+  - ESP32コア: `esp32:esp32` 3.3.10
+  - ライブラリ: M5Unified / **M5Stack_Avatar**（※検索名はアンダースコア。`Avatar.h`提供）/
+    ServoEasing / ESP32Servo / ArduinoJson
+  - **FQBN: `esp32:esp32:m5stack_core2`**
+- **ビルド/書き込みコマンド**（arduino-cliのPATHを通した上で）:
+  ```
+  arduino-cli compile --fqbn esp32:esp32:m5stack_core2 base_firmware/M5Core2_SG90_StackChan_VoiceText_Ataru
+  arduino-cli upload  --fqbn esp32:esp32:m5stack_core2 --port COM3 base_firmware/M5Core2_SG90_StackChan_VoiceText_Ataru
+  ```
+
+### 実機テストで判明した重要な2点（STEP 5に直結）
+1. **ポートは rts=False / dtr=False で開くこと**:
+   標準の `control_stackchan.py` は `rts=True`（pyserial既定）で開くため、
+   CH9102の自動リセット回路が **Core2のEN端子をLowに保持＝リセット状態で固まり、無応答**になる。
+   → 無リセットで開くと動作中のCore2へ**即応答（ACK約0.01秒）**。リセット不要で通知が瞬時・ちらつき無し。
+2. **日本語はコマンドライン引数で渡さない**:
+   Windowsではargvの日本語が文字化けする。
+   → **日本語セリフはスクリプト内(UTF-8)に埋め込み**、外部からは `--event done/ask/error` のASCIIのみ渡す。
+   ワイヤ上は `json.dumps(ensure_ascii=True)` で `\uXXXX` エスケープ→Core2(ArduinoJson)がUTF-8復元。
+
+### 新規作成: `stackchan_notify.py`（通知ロボ本体・hooks用）
+上記2点を反映した専用スクリプトをリポジトリ直下に作成。
+- `--event done` → Happy「終わったよ！見て見て！！」
+- `--event ask`  → Doubt「質問があります！」
+- `--event error`→ Sad「失敗しちゃった、、、」
+- 無リセットで開く／初回ACK失敗時のみ明示リセット→再送のフォールバック付き。
+- **3種すべて実機で表情切替＋日本語セリフ表示を確認済み**（STEP 4クリア）。
+- 補足: ファームは**セリフのみ`duration`後に自動クリア、表情は残る**（最後の通知の顔で待機）。
+- 補足: 起動時の `Error attaching servo y` はServoEasingの戻り値解釈の些細なバグ（成功していても表示）。無害。
+
+### STEP 5 での使い方（想定）
+`~/.claude/settings.json`（または プロジェクトの `.claude/settings.json`）の hooks から:
+```
+python d:\Make\StackChan-kai\stackchan_notify.py --event done   --port COM3
+python d:\Make\StackChan-kai\stackchan_notify.py --event ask    --port COM3
+```
+※ 日本語を settings.json に書かずに済むので文字化けの心配なし。
+
+---
+
 ## 段階的構築の全体像（再掲）
 
 1. hooks が発火することを確認（まず echo 等で）
