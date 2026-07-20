@@ -1,0 +1,7 @@
+// WiFi認証情報のテンプレート。
+// 実際に使う場合は同じディレクトリに wifi_config.h という名前でコピーし、
+// 値を書き換えること（wifi_config.h はgitignore対象でコミットされない）。
+#pragma once
+
+#define WIFI_SSID "your-ssid-here"
+#define WIFI_PASSWORD "your-password-here"

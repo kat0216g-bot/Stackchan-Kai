@@ -5,3 +5,7 @@ base_firmware/
 # Python
 __pycache__/
 *.pyc
+
+# WiFi認証情報（SSID/パスワード）は絶対にコミットしない
+wifi_config.h
+**/wifi_config.h
