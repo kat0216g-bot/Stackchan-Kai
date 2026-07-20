@@ -23,6 +23,18 @@
           }
         ]
       }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python d:/Make/StackChan-kai/stackchan_notify.py --event error",
+            "timeout": 10,
+            "statusMessage": "スタックチャンにエラーを通知中..."
+          }
+        ]
+      }
     ]
   }
 }

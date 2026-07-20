@@ -429,6 +429,38 @@ JSONコマンドに `motion` キーを新設して3種のモーションを実�
 
 ---
 
+## エラー通知（Sad+ブンブン）の自動発火を実装（2026-07-20）
+
+TODO4「エラー系イベントをどのフックで拾うか」に対応。`PostToolUseFailure` フック
+（ツール呼び出し失敗時に発火）を採用し、`error` イベントとして接続。
+
+### 実装内容
+- `stackchan_notify.py`: イベントごとの連続通知クールダウン機構を追加
+  （`COOLDOWN_SECONDS = {"error": 5.0}`）。1ターン中にツール失敗が連発すると
+  ブンブンが連発しうるため、`.stackchan_notify_state/<event>.last` の
+  タイムスタンプで直近5秒以内の再発火を黙ってスキップする。
+  スキップ時はexit 0（hookの失敗として扱われないように）。
+- `.claude/settings.json` に `PostToolUseFailure` フックを追加
+  （`stackchan_notify.py --event error` を実行）。
+- `.gitignore` に `.stackchan_notify_state/`（クールダウン用の実行時生成ファイル）を追加。
+
+### 検証方法の注意点
+CLIを直列(`&&`)で2回実行するテストは、各回のWiFi/mDNS接続自体に数秒かかるため、
+2回目が始まる時点で既に5秒以上経過してしまい正しく検証できなかった。
+`&`で2プロセスをほぼ同時に起動して初めてクールダウンの動作（1回はスキップ、
+1回は送信）を確認できた。実際のPostToolUseFailure連発（同一ターン内での複数ツール失敗）
+はこの並列起動に近い挙動になるため、この検証方法で妥当と判断。
+
+### 実機確認結果
+意図的にBashコマンドを失敗させ（`exit 1`）、Sad表情＋「失敗しちゃった、、、」＋ブンブンの
+自動発火を確認済み。これでSTEP5(B)の残タスク（TODO4）が解消。
+
+### 残りの発展候補
+- **A展開**: グローバル `~/.claude/settings.json` に同じhooks一式（Stop/Notification/
+  PostToolUseFailure）を入れ、全プロジェクトで通知ロボが反応するようにする。
+
+---
+
 ## 段階的構築の全体像（再掲）
 
 1. hooks が発火することを確認（まず echo 等で）

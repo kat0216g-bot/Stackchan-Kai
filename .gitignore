@@ -9,3 +9,6 @@ __pycache__/
 # WiFi認証情報（SSID/パスワード）は絶対にコミットしない
 wifi_config.h
 **/wifi_config.h
+
+# stackchan_notify.py のクールダウン状態（実行時に生成される一時マーカー）
+.stackchan_notify_state/

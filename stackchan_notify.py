@@ -16,9 +16,12 @@ Claude Code のイベント種別を ASCII フラグ(--event)で受け取り、
   - 既定の接続先は mDNS ホスト名 stackchan.local:3300。
     Windowsの名前解決でmDNSが引けない環境向けに --host でIP直指定も可能。
   - 旧シリアル版は --transport serial で引き続き利用可能（デバッグ用に残置）。
+  - error イベントは PostToolUseFailure フックから発火する想定。1ターン中に複数回
+    ツールが失敗するとブンブンが連発しうるため、イベントごとにクールダウンを設ける。
 """
 import argparse
 import json
+import pathlib
 import socket
 import sys
 import time
@@ -29,6 +32,27 @@ DEFAULT_SERIAL_PORT = "COM3"
 DEFAULT_BAUD = 115200
 ACK_TIMEOUT = 3.0   # OK/ERR を待つ秒数（WiFi経由は初回接続に時間がかかることがあるため長め）
 FACE_STACKCHAN = 2  # setupで初期化済みの唯一の顔(faces[2]) / palette 0,1 は未初期化なので使わない
+
+# イベントごとの連続通知クールダウン秒数（このイベントを最後に送ってからN秒未満なら黙ってスキップ）。
+# 設定が無いイベントはクールダウン無し。
+COOLDOWN_SECONDS = {
+    "error": 5.0,  # PostToolUseFailureは短時間に連発しうるため
+}
+STATE_DIR = pathlib.Path(__file__).resolve().parent / ".stackchan_notify_state"
+
+
+def check_and_update_cooldown(event):
+    """クールダウン中ならFalse（送信スキップ）、そうでなければ記録してTrue（送信OK）を返す。"""
+    cooldown = COOLDOWN_SECONDS.get(event)
+    if not cooldown:
+        return True
+    STATE_DIR.mkdir(exist_ok=True)
+    marker = STATE_DIR / f"{event}.last"
+    now = time.time()
+    if marker.exists() and (now - marker.stat().st_mtime) < cooldown:
+        return False
+    marker.touch()
+    return True
 
 # イベント種別 -> (表情, セリフ, 表示時間ms, モーション)
 # 表情は .ino の parseExpression が解釈できる6種のみ:
@@ -120,6 +144,10 @@ def main():
     parser.add_argument("--port", default=DEFAULT_SERIAL_PORT, help="シリアルポート (既定: %(default)s)")
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help="ボーレート (既定: %(default)d)")
     args = parser.parse_args()
+
+    if not check_and_update_cooldown(args.event):
+        print(f"[{args.event}] skipped (cooldown active)")
+        sys.exit(0)
 
     expression, speech, duration, motion = EVENTS[args.event]
     payload = build_payload(expression, speech, duration, motion)
