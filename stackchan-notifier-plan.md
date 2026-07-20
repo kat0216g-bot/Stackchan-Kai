@@ -352,6 +352,47 @@ OK diag attachX=<attach戻り値> attachY=<attach戻り値> curX=<現在角度> 
 
 ---
 
+## モーション本番実装（2026-07-20）
+
+前回確認済みの安全範囲（センターX/Y=85°、確認済み X:85〜89°、Y:85〜95°）のみを使い、
+JSONコマンドに `motion` キーを新設して3種のモーションを実装・実機確認済み。
+
+### 実装内容
+- `.ino`: `enum class Motion { None, Nod, Tilt, Shake }` を追加。`parseMotion()` で
+  JSON文字列(`"nod"`/`"tilt"`/`"shake"`)をパースし、`applyCommand()` の末尾で `playMotion()` を呼ぶ。
+  - **nod（うなずき）**: Y軸を `85→93→85` を2回往復（各ステップ後120ms待機）
+  - **tilt（首かしげ）**: X軸を `85→89` に動かし500ms保持してから `85` に戻す
+  - **shake（ブンブン）**: X軸を `85⇔89` で素早く3往復
+  - いずれもブロッキング処理（完了後にOK応答）。所要時間は1秒未満〜1秒強で、
+    既存のACK_TIMEOUT(3.0秒)内に収まる。
+- `stackchan_notify.py`: `EVENTS` に4つ目の要素としてmotionを追加
+  （done→nod, ask→tilt, error→shake）。`build_payload()` もmotionを含めるよう変更。
+
+### 実機確認結果
+- 3モーションとも単体テストで正常動作（異音なし、目視で動きを確認）
+- `stackchan_notify.py --event done` の統合テストでも、Happy表情＋セリフ＋うなずきが同時に
+  正しく発火することを確認。**通知ロボとして完成形**に到達。
+
+### ハマりどころ（Arduino自動プロトタイプ生成の罠）
+`enum class Motion` と `parseMotion()` を追加した際、既存の `parseExpression(const char*, Expression&)`
+の定義（`using namespace m5avatar;` に依存した非修飾の`Expression`型を使用）がコンパイルエラーに
+なった。原因はArduinoのビルドシステム（ctags）が関数プロトタイプを自動生成する際、
+ファイル冒頭のinclude直後に一括挿入するため、`using namespace m5avatar;`（ファイル中盤で宣言）
+より前の位置に非修飾`Expression`型を参照するコードが出現し解決できなくなったこと。
+新しい関数を追加したことで自動生成の挙動が変化し顕在化した。
+→ **対処**: 定義側も `m5avatar::Expression`（完全修飾名）に統一して解決。
+　今後この種の型（他ライブラリのnamespace由来）を関数シグネチャに使う際は、
+　`using namespace`に頼らず完全修飾名で書くのが安全。
+
+### 今後の発展余地
+- 現在の可動域はごく小さい（X:+4°, Y:+10°）ため、モーションはやや控えめ。
+  より大きく表現力のある動きにするには、center(85°)からさらに離れた角度を
+  従来と同じ1〜5°刻みの安全な段階的テストで検証し、可動域を広げる必要がある。
+- 特に`shake`は片側(85→89)のみの往復で、本来の左右往復（両方向）ではない。
+  逆方向（85より小さい値）の安全性も未検証のため、いずれ検証すると良い。
+
+---
+
 ## 段階的構築の全体像（再掲）
 
 1. hooks が発火することを確認（まず echo 等で）

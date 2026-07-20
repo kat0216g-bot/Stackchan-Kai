@@ -25,6 +25,19 @@ WiFiServer controlServer(kControlPort);
 
 constexpr size_t kJsonDocSize = 512;
 
+// 通知モーション（2026-07-20 実機キャリブレーション結果を反映）。
+// センターはX/Yとも85°（ホーン取付角のズレにより90°ではなかった）。
+// 確認済み安全範囲: X 85〜89°(+4), Y 85〜95°(+10)。この範囲外は未検証のため使わない。
+enum class Motion { None, Nod, Tilt, Shake };
+
+bool parseMotion(const char *value, Motion &out) {
+  if (!value) return false;
+  if (strcmp(value, "nod") == 0)   { out = Motion::Nod;   return true; }
+  if (strcmp(value, "tilt") == 0)  { out = Motion::Tilt;  return true; }
+  if (strcmp(value, "shake") == 0) { out = Motion::Shake; return true; }
+  return false;
+}
+
 struct StackChanCommand {
   bool expressionSet = false;
   m5avatar::Expression expression;
@@ -37,12 +50,14 @@ struct StackChanCommand {
   bool durationSet = false;
   unsigned long durationMs = 0;
   bool clear = false;
-  // 安全な可動域を実機で見極めるための暫定コマンド（1度単位の絶対角度指定）。
-  // 本番のモーション（うなずき等）はまだ実装しない。
+  // 安全な可動域を実機で見極めるための暫定コマンド（1度単位の絶対角度指定）。デバッグ用に残置。
   bool servoXSet = false;
   int servoXDeg = 0;
   bool servoYSet = false;
   int servoYDeg = 0;
+  // 本番のモーション（うなずき/首かしげ/ブンブン）
+  bool motionSet = false;
+  Motion motion = Motion::None;
 };
 
 // ハード上限（安全マージン込みの絶対クランプ）。実際にはこれより十分小さい範囲でのみテストすること。
@@ -54,9 +69,17 @@ constexpr int SERVO_X_MAX = 120;
 constexpr int SERVO_Y_MIN = 50;
 constexpr int SERVO_Y_MAX = 95;
 
+// モーション用の基準角度（すべて実機確認済みの安全範囲内）。
+constexpr int CENTER_X = 85;
+constexpr int CENTER_Y = 85;
+constexpr int NOD_Y_DOWN = 93;   // うなずき: Y方向 85→93→85 (確認済み範囲内)
+constexpr int TILT_X_SIDE = 89;  // 首かしげ: X方向 85→89 で少し保持
+constexpr int SHAKE_X_SIDE = 89; // ブンブン: X方向 85⇔89 を素早く往復
+
 bool parseExpression(const char *value, m5avatar::Expression &out);
 bool parseCommand(const String &line, StackChanCommand &out, String &error);
 void applyCommand(const StackChanCommand &cmd);
+void playMotion(Motion motion);
 void clearSpeechText();
 
 unsigned long speechClearTime = 0;
@@ -339,7 +362,7 @@ char* GenText(int expression){
 
 }
 
-bool parseExpression(const char *value, Expression &out) {
+bool parseExpression(const char *value, m5avatar::Expression &out) {
   if (!value) return false;
   if (strcmp(value, "Happy") == 0) { out = Expression::Happy; return true; }
   if (strcmp(value, "Angry") == 0) { out = Expression::Angry; return true; }
@@ -393,6 +416,15 @@ bool parseCommand(const String &line, StackChanCommand &out, String &error) {
     out.servoYDeg = doc["servoY"].as<int>();
     out.servoYSet = true;
   }
+  if (doc.containsKey("motion")) {
+    const char *motion = doc["motion"];
+    if (parseMotion(motion, out.motion)) {
+      out.motionSet = true;
+    } else {
+      error = "invalid motion";
+      return false;
+    }
+  }
   return true;
 }
 
@@ -437,6 +469,47 @@ void applyCommand(const StackChanCommand &cmd) {
   }
   if (cmd.servoXSet || cmd.servoYSet) {
     synchronizeAllServosStartAndWaitForAllServosToStop();
+  }
+  if (cmd.motionSet) {
+    playMotion(cmd.motion);
+  }
+}
+
+// 通知モーション本体。すべて実機確認済みの安全範囲(CENTER_X/Y ±確認済み量)のみを使う。
+// ブロッキング（完了までOK応答を返さない）。各モーションとも1秒前後で完了する。
+void playMotion(Motion motion) {
+  switch (motion) {
+    case Motion::Nod:
+      // うなずき: Y軸を中心から少し下げて戻す、を2回。
+      for (int i = 0; i < 2; i++) {
+        servo_y.setEaseTo(NOD_Y_DOWN);
+        synchronizeAllServosStartAndWaitForAllServosToStop();
+        delay(120);
+        servo_y.setEaseTo(CENTER_Y);
+        synchronizeAllServosStartAndWaitForAllServosToStop();
+        delay(120);
+      }
+      break;
+    case Motion::Tilt:
+      // 首かしげ: X軸を少し傾けてしばらく保持してから戻す。
+      servo_x.setEaseTo(TILT_X_SIDE);
+      synchronizeAllServosStartAndWaitForAllServosToStop();
+      delay(500);
+      servo_x.setEaseTo(CENTER_X);
+      synchronizeAllServosStartAndWaitForAllServosToStop();
+      break;
+    case Motion::Shake:
+      // ブンブン: X軸を中心と側方の間で素早く3往復。
+      for (int i = 0; i < 3; i++) {
+        servo_x.setEaseTo(SHAKE_X_SIDE);
+        synchronizeAllServosStartAndWaitForAllServosToStop();
+        servo_x.setEaseTo(CENTER_X);
+        synchronizeAllServosStartAndWaitForAllServosToStop();
+      }
+      break;
+    case Motion::None:
+    default:
+      break;
   }
 }
 

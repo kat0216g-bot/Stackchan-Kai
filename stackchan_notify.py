@@ -30,17 +30,19 @@ DEFAULT_BAUD = 115200
 ACK_TIMEOUT = 3.0   # OK/ERR を待つ秒数（WiFi経由は初回接続に時間がかかることがあるため長め）
 FACE_STACKCHAN = 2  # setupで初期化済みの唯一の顔(faces[2]) / palette 0,1 は未初期化なので使わない
 
-# イベント種別 -> (表情, セリフ, 表示時間ms)
+# イベント種別 -> (表情, セリフ, 表示時間ms, モーション)
 # 表情は .ino の parseExpression が解釈できる6種のみ:
 #   Happy / Angry / Sad / Doubt / Sleepy / Neutral
+# モーションは .ino の parseMotion が解釈できる3種のみ（すべて実機安全確認済み範囲内で動作）:
+#   nod(うなずき) / tilt(首かしげ) / shake(ブンブン)
 EVENTS = {
-    "done":  ("Happy", "終わったよ！見て見て！！", 8000),    # 完了 (Stop)
-    "ask":   ("Doubt", "質問があります！",        12000),    # 確認待ち (Notification) 気づくまで長めに
-    "error": ("Sad",   "失敗しちゃった、、、",     10000),    # エラー
+    "done":  ("Happy", "終わったよ！見て見て！！", 8000,  "nod"),    # 完了 (Stop)
+    "ask":   ("Doubt", "質問があります！",        12000, "tilt"),   # 確認待ち (Notification) 気づくまで長めに
+    "error": ("Sad",   "失敗しちゃった、、、",     10000, "shake"),  # エラー
 }
 
 
-def build_payload(expression, speech, duration):
+def build_payload(expression, speech, duration, motion):
     # ensure_ascii=True(既定)で非ASCIIは\uXXXXにエスケープされ、
     # ワイヤ上はASCIIのみ。Core2側(ArduinoJson)がUTF-8へ復元する。
     return json.dumps({
@@ -48,6 +50,7 @@ def build_payload(expression, speech, duration):
         "speech": speech,
         "face": FACE_STACKCHAN,
         "duration": duration,
+        "motion": motion,
     }).encode("ascii") + b"\n"
 
 
@@ -118,8 +121,8 @@ def main():
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help="ボーレート (既定: %(default)d)")
     args = parser.parse_args()
 
-    expression, speech, duration = EVENTS[args.event]
-    payload = build_payload(expression, speech, duration)
+    expression, speech, duration, motion = EVENTS[args.event]
+    payload = build_payload(expression, speech, duration, motion)
 
     try:
         if args.transport == "wifi":
