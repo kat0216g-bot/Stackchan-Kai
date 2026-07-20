@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 スタックチャン通知スクリプト（Claude Code hooks 用 / WiFi版）
+他プロジェクトから汎用的に喋らせるための共有API（speak()）も兼ねる。
 
 Claude Code のイベント種別を ASCII フラグ(--event)で受け取り、
 対応する表情・日本語セリフをJSONでCore2へ送る。
@@ -18,6 +19,17 @@ Claude Code のイベント種別を ASCII フラグ(--event)で受け取り、
   - 旧シリアル版は --transport serial で引き続き利用可能（デバッグ用に残置）。
   - error イベントは PostToolUseFailure フックから発火する想定。1ターン中に複数回
     ツールが失敗するとブンブンが連発しうるため、イベントごとにクールダウンを設ける。
+
+他プロジェクト（例: Tanniku_sensorのようなダッシュボード用途）からの汎用利用:
+  - Pythonから直接importするのが推奨（--speechをCLI引数で渡すとWindowsで日本語が
+    文字化けする問題を回避できる）:
+      import sys; sys.path.append(r"D:\Make\StackChan-kai")
+      from stackchan_notify import speak
+      speak("気温25度、湿度60%です", expression="Happy")
+  - CLIからも --event の代わりに --speech/--expression/--motion で呼び出せる
+    （ASCII文字列限定なら文字化けの心配なし）。
+  - スタックチャンの表示は1つしか出せないため、Claude Code通知と重なると
+    後から届いた方が上書きする（キューイングは無い）。
 """
 import argparse
 import json
@@ -65,17 +77,39 @@ EVENTS = {
     "error": ("Sad",   "失敗しちゃった、、、",     10000, "shake"),  # エラー
 }
 
+VALID_EXPRESSIONS = ["Happy", "Angry", "Sad", "Doubt", "Sleepy", "Neutral"]
+VALID_MOTIONS = ["nod", "tilt", "shake"]
+DEFAULT_CUSTOM_DURATION = 6000
 
-def build_payload(expression, speech, duration, motion):
+
+def build_payload(expression, speech, duration, motion=None):
     # ensure_ascii=True(既定)で非ASCIIは\uXXXXにエスケープされ、
     # ワイヤ上はASCIIのみ。Core2側(ArduinoJson)がUTF-8へ復元する。
-    return json.dumps({
+    # motion省略時はキー自体を送らない（.ino側はnullを想定していないため）。
+    payload = {
         "expression": expression,
         "speech": speech,
         "face": FACE_STACKCHAN,
         "duration": duration,
-        "motion": motion,
-    }).encode("ascii") + b"\n"
+    }
+    if motion:
+        payload["motion"] = motion
+    return json.dumps(payload).encode("ascii") + b"\n"
+
+
+def speak(speech, expression="Happy", motion=None, duration=DEFAULT_CUSTOM_DURATION,
+          host=DEFAULT_HOST, port=DEFAULT_TCP_PORT, timeout=ACK_TIMEOUT):
+    """他プロジェクトからimportして直接呼び出す汎用API。
+
+    例: from stackchan_notify import speak
+        speak("気温25度、湿度60%です", expression="Happy")
+
+    Claude Codeのdone/ask/errorイベントとは独立しており、クールダウンも掛からない
+    （呼び出し頻度はこの関数の呼び出し側が自分で制御すること）。
+    戻り値は send_via_wifi と同じ (bool ok, str resp)。
+    """
+    payload = build_payload(expression, speech, duration, motion)
+    return send_via_wifi(host, port, payload, timeout)
 
 
 def send_via_wifi(host, port, payload, timeout):
@@ -134,9 +168,17 @@ def send_via_serial(port, baud, payload, timeout):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="StackChan notifier for Claude Code hooks")
-    parser.add_argument("--event", choices=sorted(EVENTS.keys()), required=True,
-                        help="通知イベント種別: done(完了)/ask(確認待ち)/error(エラー)")
+    parser = argparse.ArgumentParser(description="StackChan notifier for Claude Code hooks / 汎用スピークAPI")
+    parser.add_argument("--event", choices=sorted(EVENTS.keys()), default=None,
+                        help="Claude Codeプリセットイベント: done(完了)/ask(確認待ち)/error(エラー)")
+    parser.add_argument("--speech", default=None,
+                        help="汎用モード: 任意のセリフ。--eventの代わりに指定する（他プロジェクトからの利用向け）")
+    parser.add_argument("--expression", choices=VALID_EXPRESSIONS, default="Happy",
+                        help="汎用モード時の表情 (既定: %(default)s)")
+    parser.add_argument("--motion", choices=VALID_MOTIONS, default=None,
+                        help="汎用モード時のモーション（省略可）")
+    parser.add_argument("--duration", type=int, default=None,
+                        help="汎用モード時のセリフ表示時間ms (既定: %d)" % DEFAULT_CUSTOM_DURATION)
     parser.add_argument("--transport", choices=["wifi", "serial"], default="wifi",
                         help="通信経路 (既定: %(default)s)。serialはサーボ電源が来ないデバッグ専用。")
     parser.add_argument("--host", default=DEFAULT_HOST, help="WiFi接続先ホスト名/IP (既定: %(default)s)")
@@ -145,11 +187,22 @@ def main():
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help="ボーレート (既定: %(default)d)")
     args = parser.parse_args()
 
-    if not check_and_update_cooldown(args.event):
-        print(f"[{args.event}] skipped (cooldown active)")
-        sys.exit(0)
+    if args.event and args.speech:
+        parser.error("--event と --speech は同時に指定できません")
+    if not args.event and not args.speech:
+        parser.error("--event か --speech のいずれかを指定してください")
 
-    expression, speech, duration, motion = EVENTS[args.event]
+    if args.event:
+        if not check_and_update_cooldown(args.event):
+            print(f"[{args.event}] skipped (cooldown active)")
+            sys.exit(0)
+        expression, speech, duration, motion = EVENTS[args.event]
+        label = args.event
+    else:
+        expression, speech, motion = args.expression, args.speech, args.motion
+        duration = args.duration if args.duration is not None else DEFAULT_CUSTOM_DURATION
+        label = "custom"
+
     payload = build_payload(expression, speech, duration, motion)
 
     try:
@@ -157,7 +210,7 @@ def main():
             ok, resp = send_via_wifi(args.host, args.tcp_port, payload, ACK_TIMEOUT)
         else:
             ok, resp = send_via_serial(args.port, args.baud, payload, ACK_TIMEOUT)
-        print(f"[{args.event}] {expression} \"{speech}\" -> {resp}")
+        print(f"[{label}] {expression} \"{speech}\" -> {resp}")
         sys.exit(0 if ok else 1)
     except OSError as exc:
         print(f"Connection error ({args.transport}): {exc}")

@@ -478,6 +478,45 @@ Stop（完了）/ Notification（確認待ち）/ PostToolUseFailure（エラー
 
 ---
 
+## 他プロジェクト向け汎用スピークAPI（2026-07-20）
+
+「スタックチャンを他プロジェクトのダッシュボードも兼ねさせたい」という要望に対応。
+例: `D:\Make\Tanniku_sensor`（多肉植物モニター、企画段階）でセンサー値を定期的に喋らせる、
+`D:\Make\stock_trading_llm`（株取引自動化、企画段階）で売買シグナル検知時にアクションさせる、
+といった用途を想定。両プロジェクトとも詳細仕様は未定のため、**今回はスタックチャン側の
+汎用受け口だけを整備**し、各プロジェクト固有の統合コード（データ取得・シグナル検知等）は
+それぞれの仕様が固まってから実装する方針。
+
+### 実装内容（`stackchan_notify.py`）
+- `speak(speech, expression="Happy", motion=None, duration=6000, host=..., port=...)` 関数を追加。
+  **他プロジェクトからPythonで直接importして呼ぶのが推奨**:
+  ```python
+  import sys; sys.path.append(r"D:\Make\StackChan-kai")
+  from stackchan_notify import speak
+  speak("気温25度、湿度60%です", expression="Happy", motion="nod")
+  ```
+  CLI引数(argv)経由だとWindowsで日本語が文字化けする問題を、Python文字列として
+  直接渡すことで回避できる（json.dumpsのensure_ascii=Trueで\uXXXXエスケープされるため）。
+- CLIにも汎用モードを追加: `--event` の代わりに `--speech`/`--expression`/`--motion`/`--duration`
+  を指定可能（ASCII文字列限定なら文字化けの心配なし）。`--event`と`--speech`は排他。
+- `build_payload()` はmotion省略時にJSONの`motion`キー自体を送らないよう変更
+  （`.ino`側は`motion:null`を想定しておらず、送るとparseMotion失敗でERRになるため）。
+- 汎用呼び出し（`speak()`・CLI汎用モード）にはクールダウンを掛けない
+  （呼び出し頻度は呼び出し側が自分で制御する想定）。
+
+### 実機確認結果
+`speak()`経由で日本語セリフ＋モーション（うなずき）が文字化けなく正常表示されることを確認。
+既存の`--event done/ask/error`（Claude Code hooks用）も引き続き正常動作。
+
+### 設計上の注意点（申し送り）
+- スタックチャンの表示は1つしか出せないため、Claude Code通知と他プロジェクトの発話が
+  タイミング的に重なると後着ち優先で上書きされる（キューイングは無い）。
+  用途によっては簡単な排他制御が必要になるかもしれないが、現時点では未実装。
+- 既存の3モーション（nod/tilt/shake）は流用可能で、Core2への再書き込み不要。
+  新しいモーション種別を追加する場合のみ`.ino`の再書き込みが必要。
+
+---
+
 ## 段階的構築の全体像（再掲）
 
 1. hooks が発火することを確認（まず echo 等で）
