@@ -25,9 +25,10 @@ WiFiServer controlServer(kControlPort);
 
 constexpr size_t kJsonDocSize = 512;
 
-// 通知モーション（2026-07-20 実機キャリブレーション結果を反映）。
-// センターはX/Yとも85°（ホーン取付角のズレにより90°ではなかった）。
-// 確認済み安全範囲: X 85〜89°(+4), Y 85〜95°(+10)。この範囲外は未検証のため使わない。
+// 通知モーション（2026-07-20 実機キャリブレーション結果を反映・第2回で再調整）。
+// センターはX=80°, Y=75°（ホーン取付角のズレにより当初の85°よりさらに調整が必要だった）。
+// 確認済み安全範囲: X 65〜105°(±20), Y 75〜95°(+20、ただし95°付近は当たっている感覚があり要注意)。
+// この範囲外は未検証のため使わない。
 enum class Motion { None, Nod, Tilt, Shake };
 
 bool parseMotion(const char *value, Motion &out) {
@@ -60,21 +61,19 @@ struct StackChanCommand {
   Motion motion = Motion::None;
 };
 
-// ハード上限（安全マージン込みの絶対クランプ）。実際にはこれより十分小さい範囲でのみテストすること。
-// Y軸は公式stack-chan-arduinoのデフォルト可動域(lower_limit=50, upper_limit=90)がベースだが、
-// この個体はホーンの取り付け角度がずれておりセンターがずれている可能性があるため、
-// 実機確認のため一時的に上限を95まで拡張中（確認後は妥当な値に戻すこと）。
-constexpr int SERVO_X_MIN = 60;
-constexpr int SERVO_X_MAX = 120;
-constexpr int SERVO_Y_MIN = 50;
+// ハード上限（安全マージン込みの絶対クランプ）。実機で65〜105(X)/75〜95(Y)まで確認済み。
+constexpr int SERVO_X_MIN = 65;
+constexpr int SERVO_X_MAX = 105;
+constexpr int SERVO_Y_MIN = 75;
 constexpr int SERVO_Y_MAX = 95;
 
-// モーション用の基準角度（すべて実機確認済みの安全範囲内）。
-constexpr int CENTER_X = 85;
-constexpr int CENTER_Y = 85;
-constexpr int NOD_Y_DOWN = 93;   // うなずき: Y方向 85→93→85 (確認済み範囲内)
-constexpr int TILT_X_SIDE = 89;  // 首かしげ: X方向 85→89 で少し保持
-constexpr int SHAKE_X_SIDE = 89; // ブンブン: X方向 85⇔89 を素早く往復
+// モーション用の基準角度（すべて実機確認済みの安全範囲内。テスト済み最大値より少し内側を使用）。
+constexpr int CENTER_X = 80;
+constexpr int CENTER_Y = 75;
+constexpr int NOD_Y_DOWN = 90;    // うなずき: Y方向 75→90→75 (95°付近は避ける)
+constexpr int TILT_X_SIDE = 95;   // 首かしげ: X方向 80→95 で少し保持
+constexpr int SHAKE_X_RIGHT = 95; // ブンブン: X方向 65⇔95 の真の左右往復
+constexpr int SHAKE_X_LEFT = 65;
 
 bool parseExpression(const char *value, m5avatar::Expression &out);
 bool parseCommand(const String &line, StackChanCommand &out, String &error);
@@ -127,10 +126,9 @@ Face* faces[3];
 ColorPalette* cps[3];
 
 // サーボの初期角度設定（X軸, Y軸）
-// 実機キャリブレーション結果（2026-07-20）: このユニットはホーンの取り付け角度により
-// ソフト90°ではなく85°が実際の正面（センター）だったため、初期姿勢を85に変更。
-#define START_DEGREE_VALUE_X 85
-#define START_DEGREE_VALUE_Y 85
+// 実機キャリブレーション結果（2026-07-20、第2回で再調整）: X=80°, Y=75°が実際の正面（センター）。
+#define START_DEGREE_VALUE_X 80
+#define START_DEGREE_VALUE_Y 75
 
 // サーボイージングを使用してなめらかに動作させるためのオブジェクト
 ServoEasing servo_x;
@@ -499,13 +497,15 @@ void playMotion(Motion motion) {
       synchronizeAllServosStartAndWaitForAllServosToStop();
       break;
     case Motion::Shake:
-      // ブンブン: X軸を中心と側方の間で素早く3往復。
-      for (int i = 0; i < 3; i++) {
-        servo_x.setEaseTo(SHAKE_X_SIDE);
+      // ブンブン: X軸を左右(SHAKE_X_LEFT/RIGHT)で素早く往復させ、最後に中心へ戻す。
+      for (int i = 0; i < 2; i++) {
+        servo_x.setEaseTo(SHAKE_X_RIGHT);
         synchronizeAllServosStartAndWaitForAllServosToStop();
-        servo_x.setEaseTo(CENTER_X);
+        servo_x.setEaseTo(SHAKE_X_LEFT);
         synchronizeAllServosStartAndWaitForAllServosToStop();
       }
+      servo_x.setEaseTo(CENTER_X);
+      synchronizeAllServosStartAndWaitForAllServosToStop();
       break;
     case Motion::None:
     default:
