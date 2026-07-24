@@ -23,6 +23,12 @@ constexpr uint16_t kControlPort = 3300;
 constexpr char kMdnsHostname[] = "stackchan"; // http://stackchan.local 相当でアクセス可能にする
 WiFiServer controlServer(kControlPort);
 
+// 長時間稼働中にWiFiが切断された場合の自動再接続用（2026-07-20 追加）。
+// 起動しっぱなしにしていたらWiFiが途絶えて通知が届かなくなった事象への対応。
+constexpr unsigned long kWifiCheckIntervalMs = 5000;   // 5秒おきに接続状態を確認
+constexpr unsigned long kWifiReconnectTimeoutMs = 10000; // 再接続試行の最大待ち時間
+unsigned long lastWifiCheckMs = 0;
+
 constexpr size_t kJsonDocSize = 512;
 
 // 通知モーション（2026-07-20 実機キャリブレーション結果を反映・第2回で再調整）。
@@ -80,6 +86,7 @@ bool parseCommand(const String &line, StackChanCommand &out, String &error);
 void applyCommand(const StackChanCommand &cmd);
 void playMotion(Motion motion);
 void clearSpeechText();
+void ensureWifiConnected();
 
 unsigned long speechClearTime = 0;
 bool speechPending = false;
@@ -538,6 +545,32 @@ String handleCommandLine(const String &rawLine) {
   return "ERR " + error;
 }
 
+// WiFiが切断されていたら再接続を試みる（長時間稼働中の切断対策）。
+// 呼び出しごとに毎回チェックすると重いので、kWifiCheckIntervalMsおきに間引く。
+void ensureWifiConnected() {
+  if (millis() - lastWifiCheckMs < kWifiCheckIntervalMs) return;
+  lastWifiCheckMs = millis();
+  if (WiFi.status() == WL_CONNECTED) return;
+
+  Serial.println("WiFi disconnected. Reconnecting...");
+  WiFi.disconnect();
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < kWifiReconnectTimeoutMs) {
+    delay(250);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("WiFi reconnected. IP: " + WiFi.localIP().toString());
+    // 切断・再接続でmDNSの内部状態が古くなる場合があるため念のため再登録する。
+    MDNS.end();
+    if (MDNS.begin(kMdnsHostname)) {
+      Serial.printf("mDNS restarted: http://%s.local\n", kMdnsHostname);
+    }
+  } else {
+    Serial.println("WiFi reconnect failed. Will retry later.");
+  }
+}
+
 // サーボ用の電源はスタックチャン本体電源Type-C接続時のみ供給され、
 // その場合USBシリアルでの通信ができない（本体USB-Cはデータ非対応の給電専用ポートのため）。
 // そのためWiFi経由のTCP接続でも同じJSONコマンドを受け付ける。
@@ -567,6 +600,7 @@ void handleWifiClients() {
 // ----------------------------------------------
 void loop() {
   M5.update();
+  ensureWifiConnected();
   if (Serial.available()) {
     String line = Serial.readStringUntil('\n');
     line.trim();
