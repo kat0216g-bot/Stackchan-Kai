@@ -81,6 +81,43 @@ VALID_EXPRESSIONS = ["Happy", "Angry", "Sad", "Doubt", "Sleepy", "Neutral"]
 VALID_MOTIONS = ["nod", "tilt", "shake"]
 DEFAULT_CUSTOM_DURATION = 6000
 
+# 吹き出しの見切れ対策（長文の自動折り返し）。
+# フォントはlgfxJapanGothic_12・TEXT_SIZE=2固定なので、この単位数は実機で見ながら調整すること。
+# 半角=1単位・全角=2単位のおおまかな目安で計算する（正確なフォント幅計測はしていない）。
+WRAP_MAX_UNITS_PER_LINE = 24
+WRAP_MAX_LINES = 3
+
+
+def _char_width_units(ch):
+    return 1 if ord(ch) < 0x3000 else 2
+
+
+def wrap_speech(text, max_units_per_line=WRAP_MAX_UNITS_PER_LINE, max_lines=WRAP_MAX_LINES):
+    """長いセリフを吹き出しに収まるよう複数行(\n区切り)に折り返す。
+    行数を超える分は末尾を「…」で省略する。Balloon.h側は\nで分割して描画するだけなので、
+    どこで折り返すかの判断はこちらで行う。
+    """
+    lines = []
+    current = ""
+    current_units = 0
+    for ch in text:
+        w = _char_width_units(ch)
+        if current and current_units + w > max_units_per_line:
+            lines.append(current)
+            current, current_units = ch, w
+        else:
+            current += ch
+            current_units += w
+    if current:
+        lines.append(current)
+
+    truncated = len(lines) > max_lines
+    lines = lines[:max_lines]
+    if truncated and lines:
+        last = lines[-1]
+        lines[-1] = (last[:-1] + "…") if len(last) > 1 else "…"
+    return "\n".join(lines)
+
 
 def build_payload(expression, speech, duration, motion=None):
     # ensure_ascii=True(既定)で非ASCIIは\uXXXXにエスケープされ、
@@ -88,7 +125,7 @@ def build_payload(expression, speech, duration, motion=None):
     # motion省略時はキー自体を送らない（.ino側はnullを想定していないため）。
     payload = {
         "expression": expression,
-        "speech": speech,
+        "speech": wrap_speech(speech),
         "face": FACE_STACKCHAN,
         "duration": duration,
     }
