@@ -622,6 +622,49 @@ Sources:
 
 ---
 
+## 音声合成(VOICEVOX)着手：Step 1〜3（2026-07-27）
+
+AquesTalk-ESP32が有料と判明したため、**無料のVOICEVOX**を採用する方針に転換し、
+ステップバイステップで安全に検証しながら着手した。
+
+### 採用アーキテクチャ
+- **VOICEVOX（無料・商用利用可、クレジット表記のみ必要）** をPC（将来的にはRaspberry Pi）で
+  ローカルサーバーとして稼働させ、テキスト→音声データ変換のみを担当。
+  **実際の音声再生はスタックチャン本体のスピーカーで行う**（PCのスピーカーではない）。
+- 将来Raspberry Piに常時稼働タスク（株スクリーニング・多肉植物モニタ）を移す計画とも相性が良い：
+  `stackchan_notify.py`はただのPython+WiFi通信でWindows依存が無く、VOICEVOX EngineもLinux/ARM版が
+  あるため、**VOICEVOXもPiに置けばPCがスリープしていても音声機能は独立して動作する**。
+  逆にPCにしか置かないと、Pi起点の発話のたびにPCをWOLで起こす必要がありレイテンシが増える。
+
+### Step 1-2: VOICEVOX導入・音声合成確認（Core2に一切触れないリスクゼロの作業）
+- 公式サイト経由でCPU版インストーラー(`VOICEVOX-CPU.Web.Setup.0.25.2.exe`, 約1.2MBのWeb Setup形式)を
+  取得しインストール。ローカルAPIサーバーが起動（**ポートは50021固定ではなく、環境により
+  動的に変わる**。今回は50042だった。`Get-NetTCPConnection -OwningProcess <PID>`で実ポートを
+  確認する必要がある）。
+- Pythonから`/audio_query`→`/synthesis`のAPIを呼び、WAV生成→PCスピーカーで再生し音質を確認。
+  話者は「ずんだもん(ノーマル, speaker id=3)」等、`/speakers`で一覧取得可能。
+
+### Step 3: Core2スピーカーの生存確認＋おまけ機能
+`.ino`を以下の通り修正・実機確認済み：
+- `M5.Speaker.begin()`を有効化（従来コメントアウトされていた）。起動時に確認用ビープ音
+  （`M5.Speaker.tone(1000, 300)`）を追加し、スピーカーが物理的に鳴ることを確認。
+- **バッテリー残量アイコン表示**: `m5stack-avatar`ライブラリに標準搭載されていた
+  `avatar.setBatteryIcon(true)` / `avatar.setBatteryStatus(isCharging, level)` を有効化。
+  5秒おきに`M5.Power`から取得して更新。
+- **音声ON/OFFトグル（既定OFF）**: `M5.BtnA.wasPressed()`でトグルする`audioEnabled`フラグを追加。
+  切替時に吹き出しで「音声ON」「音声OFF」を2秒間表示して確認できるようにした
+  （常時表示のインジケーターではなく、切替時の確認メッセージ方式。実際の音声再生パイプラインは
+  未実装で、`audioEnabled`は将来そこにゲート条件として使う想定）。
+- 起動ビープ音・バッテリーアイコン・ボタントグル表示、いずれも実機確認済み。
+
+### 次にやること（Step 4以降）
+- Step 4: WiFi経由でVOICEVOXの音声データをCore2に転送し再生する最小プロトタイプ
+  （現在の小さなJSON TCPコマンドとは別に、数十〜数百KBの音声データを送る仕組みの設計が必要）。
+- Step 6-7: エンドツーエンド確認、既存の`speak()`/イベント通知との統合
+  （`audioEnabled`がtrueの時だけ音声も鳴らす、等）。
+
+---
+
 ## 段階的構築の全体像（再掲）
 
 1. hooks が発火することを確認（まず echo 等で）

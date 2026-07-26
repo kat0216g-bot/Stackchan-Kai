@@ -29,6 +29,14 @@ constexpr unsigned long kWifiCheckIntervalMs = 5000;   // 5秒おきに接続状
 constexpr unsigned long kWifiReconnectTimeoutMs = 10000; // 再接続試行の最大待ち時間
 unsigned long lastWifiCheckMs = 0;
 
+// バッテリー残量表示の定期更新（2026-07-27 追加）。
+constexpr unsigned long kBatteryCheckIntervalMs = 5000;
+unsigned long lastBatteryCheckMs = 0;
+
+// 将来の音声出力(VOICEVOX等)用のON/OFFフラグ。ボタンA(BtnA)でトグルし、既定はOFF。
+// 実際の音声再生パイプラインは未実装（このフラグは実装時にゲート条件として使う想定）。
+bool audioEnabled = false;
+
 constexpr size_t kJsonDocSize = 512;
 
 // 通知モーション（2026-07-20 実機キャリブレーション結果を反映・第2回で再調整）。
@@ -226,7 +234,9 @@ void setup() {
   spk_config.sample_rate = 88200;
   spk_config.stereo = false;
   M5.Speaker.config(spk_config);
-  // M5.Speaker.begin();  // 必要に応じてアンコメント
+  M5.Speaker.begin();
+  // スピーカーが物理的に生きているか確認するための起動確認音（動作確認用、後で消してよい）。
+  M5.Speaker.tone(1000, 300);
 
   // サーボの初期設定：指定ピン、初期角度、PWMパルス幅の設定
   // 戻り値をservoXAttachResult/servoYAttachResultに保存し、WiFi応答経由でも診断できるようにする
@@ -312,6 +322,10 @@ void setup() {
   // タスクとして行動制御とサーボ制御をアバターへ追加
   avatar.addTask(behavior, "behavior");
   //avatar.addTask(servoloop, "servoloop");
+
+  // バッテリー残量アイコンを常時表示する（ライブラリ組み込み機能）。
+  avatar.setBatteryIcon(true);
+  avatar.setBatteryStatus(M5.Power.isCharging(), M5.Power.getBatteryLevel());
 
   // ランダムシードの初期化
   // 未接続のアナログピン（A0）を読み取ることで擬似的な乱数シードを生成
@@ -601,6 +615,21 @@ void handleWifiClients() {
 void loop() {
   M5.update();
   ensureWifiConnected();
+
+  // バッテリー残量表示の定期更新。
+  if (millis() - lastBatteryCheckMs >= kBatteryCheckIntervalMs) {
+    lastBatteryCheckMs = millis();
+    avatar.setBatteryStatus(M5.Power.isCharging(), M5.Power.getBatteryLevel());
+  }
+
+  // BtnAで音声ON/OFFをトグル（既定OFF）。切替結果を一時的に吹き出しで表示する。
+  if (M5.BtnA.wasPressed()) {
+    audioEnabled = !audioEnabled;
+    avatar.setSpeechText(audioEnabled ? "音声ON" : "音声OFF");
+    speechPending = true;
+    speechClearTime = millis() + 2000;
+  }
+
   if (Serial.available()) {
     String line = Serial.readStringUntil('\n');
     line.trim();
