@@ -16,6 +16,7 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include "wifi_config.h"    // WIFI_SSID / WIFI_PASSWORD を定義（gitignore対象）
+#include "voices.h"         // VOICEVOXで事前生成した固定フレーズ音声（tools/wav_to_header.pyが自動生成）
 
 // サーボ用電源はスタックチャン本体の電源Type-Cからのみ供給される（本体USB-Cは非対応）。
 // そのためPCとの通信はUSBシリアルではなくWiFi(TCP)で行う。
@@ -33,9 +34,12 @@ unsigned long lastWifiCheckMs = 0;
 constexpr unsigned long kBatteryCheckIntervalMs = 5000;
 unsigned long lastBatteryCheckMs = 0;
 
-// 将来の音声出力(VOICEVOX等)用のON/OFFフラグ。ボタンA(BtnA)でトグルし、既定はOFF。
-// 実際の音声再生パイプラインは未実装（このフラグは実装時にゲート条件として使う想定）。
+// 音声再生のON/OFFフラグ。ボタンA(BtnA)でトグルし、既定はOFF。
 bool audioEnabled = false;
+
+// 音量調整（BtnB=ダウン, BtnC=アップ）。M5Unifiedの既定値(64/255)に合わせて開始。
+uint8_t speakerVolume = 64;
+constexpr uint8_t kVolumeStep = 26;  // 255の約10%刻み
 
 constexpr size_t kJsonDocSize = 512;
 
@@ -73,6 +77,9 @@ struct StackChanCommand {
   // 本番のモーション（うなずき/首かしげ/ブンブン）
   bool motionSet = false;
   Motion motion = Motion::None;
+  // 事前生成した固定フレーズ音声の再生（voices.h の kVoiceTable の name を指定）
+  bool soundSet = false;
+  String soundName;
 };
 
 // ハード上限（安全マージン込みの絶対クランプ）。実機で65〜105(X)/75〜95(Y)まで確認済み。
@@ -95,6 +102,7 @@ void applyCommand(const StackChanCommand &cmd);
 void playMotion(Motion motion);
 void clearSpeechText();
 void ensureWifiConnected();
+bool playVoice(const String &name);
 
 unsigned long speechClearTime = 0;
 bool speechPending = false;
@@ -444,7 +452,25 @@ bool parseCommand(const String &line, StackChanCommand &out, String &error) {
       return false;
     }
   }
+  if (doc.containsKey("sound")) {
+    out.soundName = String((const char *)doc["sound"]);
+    out.soundSet = true;
+  }
   return true;
+}
+
+// 事前生成した固定フレーズ音声を名前で検索して再生する。
+// audioEnabled が false（既定）のときは何もしない（BtnAでトグル）。
+// playWav は非ブロッキングなので、この後にモーションを動かすと音と動きが重なる。
+bool playVoice(const String &name) {
+  if (!audioEnabled) return false;
+  for (size_t i = 0; i < kVoiceCount; i++) {
+    if (name == kVoiceTable[i].name) {
+      M5.Speaker.playWav(kVoiceTable[i].data, kVoiceTable[i].length);
+      return true;
+    }
+  }
+  return false;
 }
 
 void clearSpeechText() {
@@ -488,6 +514,10 @@ void applyCommand(const StackChanCommand &cmd) {
   }
   if (cmd.servoXSet || cmd.servoYSet) {
     synchronizeAllServosStartAndWaitForAllServosToStop();
+  }
+  // モーションはブロッキングなので、先に音声を鳴らして両者を重ねる。
+  if (cmd.soundSet) {
+    playVoice(cmd.soundName);
   }
   if (cmd.motionSet) {
     playMotion(cmd.motion);
@@ -628,6 +658,18 @@ void loop() {
     avatar.setSpeechText(audioEnabled ? "音声ON" : "音声OFF");
     speechPending = true;
     speechClearTime = millis() + 2000;
+  }
+
+  // BtnB=音量ダウン, BtnC=音量アップ。変更後の音量%を表示し、確認用ビープ音を鳴らす。
+  if (M5.BtnB.wasPressed() || M5.BtnC.wasPressed()) {
+    int newVolume = speakerVolume + (M5.BtnC.wasPressed() ? kVolumeStep : -kVolumeStep);
+    speakerVolume = constrain(newVolume, 0, 255);
+    M5.Speaker.setVolume(speakerVolume);
+    int percent = (int)speakerVolume * 100 / 255;
+    avatar.setSpeechText(("音量 " + String(percent) + "%").c_str());
+    speechPending = true;
+    speechClearTime = millis() + 2000;
+    M5.Speaker.tone(1000, 200);  // 変更後の音量を実際に聞いて確認できるように
   }
 
   if (Serial.available()) {

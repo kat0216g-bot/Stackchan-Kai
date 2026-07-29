@@ -79,6 +79,10 @@ EVENTS = {
 
 VALID_EXPRESSIONS = ["Happy", "Angry", "Sad", "Doubt", "Sleepy", "Neutral"]
 VALID_MOTIONS = ["nod", "tilt", "shake"]
+# 再生できる音声はCore2に埋め込まれたもののみ（assets/voices/*.wav → voices.h）。
+# フレーズを追加したら tools/generate_voices.py → tools/wav_to_header.py → 再書き込みが必要。
+# なおCore2側はBtnAで音声ON/OFFを切り替えられ、既定はOFF（OFFなら送っても鳴らない）。
+VALID_SOUNDS = ["done", "ask", "error"]
 DEFAULT_CUSTOM_DURATION = 6000
 
 # 吹き出しの見切れ対策（長文の自動折り返し）。
@@ -119,10 +123,10 @@ def wrap_speech(text, max_units_per_line=WRAP_MAX_UNITS_PER_LINE, max_lines=WRAP
     return "\n".join(lines)
 
 
-def build_payload(expression, speech, duration, motion=None):
+def build_payload(expression, speech, duration, motion=None, sound=None):
     # ensure_ascii=True(既定)で非ASCIIは\uXXXXにエスケープされ、
     # ワイヤ上はASCIIのみ。Core2側(ArduinoJson)がUTF-8へ復元する。
-    # motion省略時はキー自体を送らない（.ino側はnullを想定していないため）。
+    # motion/sound省略時はキー自体を送らない（.ino側はnullを想定していないため）。
     payload = {
         "expression": expression,
         "speech": wrap_speech(speech),
@@ -131,21 +135,26 @@ def build_payload(expression, speech, duration, motion=None):
     }
     if motion:
         payload["motion"] = motion
+    if sound:
+        payload["sound"] = sound
     return json.dumps(payload).encode("ascii") + b"\n"
 
 
 def speak(speech, expression="Happy", motion=None, duration=DEFAULT_CUSTOM_DURATION,
-          host=DEFAULT_HOST, port=DEFAULT_TCP_PORT, timeout=ACK_TIMEOUT):
+          sound=None, host=DEFAULT_HOST, port=DEFAULT_TCP_PORT, timeout=ACK_TIMEOUT):
     """他プロジェクトからimportして直接呼び出す汎用API。
 
     例: from stackchan_notify import speak
         speak("気温25度、湿度60%です", expression="Happy")
 
+    soundにはCore2へ事前に埋め込んだ音声名(VALID_SOUNDS)を指定できる。
+    任意のテキストを読み上げることはできない点に注意（フレーズは事前生成方式のため）。
+
     Claude Codeのdone/ask/errorイベントとは独立しており、クールダウンも掛からない
     （呼び出し頻度はこの関数の呼び出し側が自分で制御すること）。
     戻り値は send_via_wifi と同じ (bool ok, str resp)。
     """
-    payload = build_payload(expression, speech, duration, motion)
+    payload = build_payload(expression, speech, duration, motion, sound)
     return send_via_wifi(host, port, payload, timeout)
 
 
@@ -214,6 +223,8 @@ def main():
                         help="汎用モード時の表情 (既定: %(default)s)")
     parser.add_argument("--motion", choices=VALID_MOTIONS, default=None,
                         help="汎用モード時のモーション（省略可）")
+    parser.add_argument("--sound", choices=VALID_SOUNDS, default=None,
+                        help="汎用モード時に再生する事前録音音声（省略可）")
     parser.add_argument("--duration", type=int, default=None,
                         help="汎用モード時のセリフ表示時間ms (既定: %d)" % DEFAULT_CUSTOM_DURATION)
     parser.add_argument("--transport", choices=["wifi", "serial"], default="wifi",
@@ -234,13 +245,16 @@ def main():
             print(f"[{args.event}] skipped (cooldown active)")
             sys.exit(0)
         expression, speech, duration, motion = EVENTS[args.event]
+        # 音声名はイベント名と同じにしてある（voices.h の kVoiceTable と対応）
+        sound = args.event if args.event in VALID_SOUNDS else None
         label = args.event
     else:
         expression, speech, motion = args.expression, args.speech, args.motion
+        sound = args.sound
         duration = args.duration if args.duration is not None else DEFAULT_CUSTOM_DURATION
         label = "custom"
 
-    payload = build_payload(expression, speech, duration, motion)
+    payload = build_payload(expression, speech, duration, motion, sound)
 
     try:
         if args.transport == "wifi":
