@@ -751,6 +751,57 @@ done/ask/errorの3イベントとも、表情+セリフ+モーション+音声�
 
 ---
 
+## stock_signal音声の追加（2026-08-01, GitHub Issue #2対応）
+
+stock_trading_llmからの依頼（Issue #2）に対応し、株シグナル点灯用の音声を追加した。
+
+### 実装内容
+- **sound識別子**: `stock_signal` / **フレーズ**: 「シグナル点灯だよ！」
+  （銘柄名・価格は含めない。動的情報は画面表示テキスト側に任せる方針を踏襲）
+- `tools/generate_voices.py`のPHRASESに追加→`assets/voices/stock_signal.wav`生成
+- `stackchan_notify.py`の`VALID_SOUNDS`に追加
+- 呼び出し側（stock_trading_llm）は`speak(text, expression='Doubt', motion='tilt', sound='stock_signal')`
+  を呼ぶだけで良い想定。実機でexpression+motion+soundの同時発火を確認済み。
+- Issue #2にコメント（実装内容・呼び出し方法）を残してクローズ済み。
+
+---
+
+## 待機中のつぶやき・軽い動き（2026-08-01）
+
+デフォルトのスタックチャンはランダムな動きがあったが、今回のカスタムファームは通知駆動のため
+「通知が無い間はほぼ無表情で静止したまま」になっていた。通知が無い時間が続いたら、たまに
+ランダムなつぶやき＋軽い動きをする「待機中アクション」を追加した。
+
+### 設計
+- `lastActivityMs`: 通知（`applyCommand`経由のexpression/speech/motion/sound）が来るたびに更新。
+  待機動作が実際の通知に割り込まないよう、通知の方を常に優先する。
+- `maybeIdleChatter()`: `loop()`から毎回呼ぶが、実際のチェックは30秒おき（`kIdleCheckIntervalMs`）
+  に間引く。最後の通知から90秒（`kIdleThresholdMs`）以上経っていて、かつ判定のたびに40%
+  （`kIdleActionChancePercent`）の確率が当たった時だけ発動する（機械的な周期にならないように）。
+- 発動時: 待機中らしい表情（Neutral/Happy/Sleepyからランダム）+ 元からあった`messages[]`配列
+  （6個のつぶやき候補、既存だが未使用だったものを復活）からランダムに1つ表示 + 対応する音声再生
+  + 軽い動き（既存モーションのうち一番軽い`Tilt`を流用、新規モーションは作らず）。
+
+### 音声追加（6フレーズ）
+`messages[]`と全く同じ文言・同じ並び順で音声を生成し、`.ino`側に`idleVoiceNames[]`という
+対応表（`messages[]`と同じindexで対応する音声名を引ける配列）を追加した。
+`generate_voices.py`のPHRASESにも追記（`idle_play`/`idle_hungry`/`idle_sleepy`/`idle_game`/
+`idle_weather`/`idle_walk`）。**この2つの配列は同じ並び順・同じ要素数を維持すること**
+（`messages[]`を増減する際は`idleVoiceNames[]`と`generate_voices.py`の対応するエントリも
+同時に更新する必要がある）。
+
+### 実機確認結果
+待機中に音声付きでつぶやき＋軽い動きが発動することを確認済み。フラッシュ使用量は28%
+（音声合計10フレーズ・約533KB）で、まだ余裕がある。
+
+### 容量に関する補足（ユーザーからの質問）
+M5Core2には実はmicroSDスロットが搭載されている（SPI接続、`SD.h`、FAT32推奨）。
+将来フレーズが大幅に増えて容量が厳しくなった場合、または「WiFi経由で書き込みなしに
+フレーズを追加したい」というニーズが出た場合は、ファーム埋め込み方式からSDカード方式への
+移行を検討するとよい（現時点ではまだ容量に余裕があるため未着手）。
+
+---
+
 ## 段階的構築の全体像（再掲）
 
 1. hooks が発火することを確認（まず echo 等で）

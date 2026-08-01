@@ -41,6 +41,16 @@ bool audioEnabled = false;
 uint8_t speakerVolume = 64;
 constexpr uint8_t kVolumeStep = 26;  // 255の約10%刻み
 
+// 待機中のちょっとした動き・つぶやき（2026-08-01 追加）。
+// 通知が一定時間来ていない時に、まれにランダムなつぶやき＋軽い動きをする。
+// 通知（expression/speech/motion/sound）が来るたびにlastActivityMsをリセットするため、
+// 通知が優先され、待機動作が割り込むことはない。
+unsigned long lastActivityMs = 0;
+unsigned long lastIdleCheckMs = 0;
+constexpr unsigned long kIdleThresholdMs = 90000;      // 90秒通知が無ければ待機状態とみなす
+constexpr unsigned long kIdleCheckIntervalMs = 30000;  // 30秒おきに発動するか判定（毎回ではない）
+constexpr int kIdleActionChancePercent = 40;           // 判定のたびに40%の確率で発動
+
 constexpr size_t kJsonDocSize = 512;
 
 // 通知モーション（2026-07-20 実機キャリブレーション結果を反映・第2回で再調整）。
@@ -103,6 +113,7 @@ void playMotion(Motion motion);
 void clearSpeechText();
 void ensureWifiConnected();
 bool playVoice(const String &name);
+void maybeIdleChatter();
 
 unsigned long speechClearTime = 0;
 bool speechPending = false;
@@ -121,6 +132,11 @@ const char* messages[] = {
   "お散歩行こう"
 };
 const int MESSAGE_COUNT = sizeof(messages) / sizeof(messages[0]);
+
+// messages[]と同じ並び順・同じ要素数にすること（voices.h側はtools/generate_voices.pyで対応生成）。
+const char* idleVoiceNames[] = {
+  "idle_play", "idle_hungry", "idle_sleepy", "idle_game", "idle_weather", "idle_walk"
+};
 
 #ifdef USE_VOICE_TEXT
 #include "AudioFileSourceBuffer.h"
@@ -483,6 +499,8 @@ void clearSpeechText() {
 }
 
 void applyCommand(const StackChanCommand &cmd) {
+  // 通知を受けたら待機動作のタイマーをリセットする（待機動作が通知に割り込まないように）。
+  lastActivityMs = millis();
   if (cmd.faceSet && cmd.faceIndex >= 0 && cmd.faceIndex < 3) {
     avatar.setFace(faces[cmd.faceIndex]);
   }
@@ -562,6 +580,30 @@ void playMotion(Motion motion) {
     default:
       break;
   }
+}
+
+// 待機中のちょっとしたつぶやき・軽い動き。lastActivityMsから一定時間(kIdleThresholdMs)
+// 経っている場合のみ、kIdleCheckIntervalMsおきに一定確率(kIdleActionChancePercent)で発動する。
+// 通知（applyCommand経由）が来ればlastActivityMsがリセットされるため、通知を邪魔しない。
+void maybeIdleChatter() {
+  unsigned long now = millis();
+  if (now - lastIdleCheckMs < kIdleCheckIntervalMs) return;
+  lastIdleCheckMs = now;
+  if (now - lastActivityMs < kIdleThresholdMs) return;
+  if ((int)random(0, 100) >= kIdleActionChancePercent) return;
+
+  // 通知用の感情(Sad/Angry)は使わず、待機中らしい表情だけをランダムに選ぶ。
+  static const m5avatar::Expression kIdleExpressions[] = {
+    m5avatar::Expression::Neutral, m5avatar::Expression::Happy, m5avatar::Expression::Sleepy};
+  constexpr int kIdleExpressionCount = sizeof(kIdleExpressions) / sizeof(kIdleExpressions[0]);
+
+  int idx = random(0, MESSAGE_COUNT);
+  avatar.setExpression(kIdleExpressions[random(0, kIdleExpressionCount)]);
+  avatar.setSpeechText(messages[idx]);
+  speechPending = true;
+  speechClearTime = millis() + 4000;
+  playVoice(idleVoiceNames[idx]);   // messages[]と同じindexに対応する音声（audioEnabled=OFFなら無音）
+  playMotion(Motion::Tilt);  // 既存モーションの中で一番軽い動きを流用
 }
 
 // 1行分のコマンド文字列を解釈して実行し、応答文字列("OK"または"ERR ...")を返す。
@@ -685,4 +727,5 @@ void loop() {
   if (speechPending && speechClearTime != 0 && millis() >= speechClearTime) {
     clearSpeechText();
   }
+  maybeIdleChatter();
 }

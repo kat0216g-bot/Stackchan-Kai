@@ -43,6 +43,13 @@ PHRASES = {
     # stock_trading_llm からの依頼（GitHub Issue #2）。
     # 銘柄名・価格などの動的情報は含めない（画面表示テキスト側に任せる）。
     "stock_signal": "シグナル点灯だよ！",
+    # 待機中のつぶやき（.ino の messages[] と対応。同じ文言・同じ並び順にすること）。
+    "idle_play":    "今日は何して遊んだの？",
+    "idle_hungry":  "おなかがすいたよ～",
+    "idle_sleepy":  "眠くなってきちゃった・・・",
+    "idle_game":    "一緒にゲームしよう",
+    "idle_weather": "明日ははれるといいね",
+    "idle_walk":    "お散歩行こう",
 }
 
 
