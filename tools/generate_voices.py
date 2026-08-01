@@ -40,6 +40,9 @@ PHRASES = {
     "done":  "終わったよ！見て見て！",
     "ask":   "質問があります！",
     "error": "失敗しちゃった",
+    # stock_trading_llm からの依頼（GitHub Issue #2）。
+    # 銘柄名・価格などの動的情報は含めない（画面表示テキスト側に任せる）。
+    "stock_signal": "シグナル点灯だよ！",
 }
 
 

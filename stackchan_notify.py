@@ -82,7 +82,7 @@ VALID_MOTIONS = ["nod", "tilt", "shake"]
 # 再生できる音声はCore2に埋め込まれたもののみ（assets/voices/*.wav → voices.h）。
 # フレーズを追加したら tools/generate_voices.py → tools/wav_to_header.py → 再書き込みが必要。
 # なおCore2側はBtnAで音声ON/OFFを切り替えられ、既定はOFF（OFFなら送っても鳴らない）。
-VALID_SOUNDS = ["done", "ask", "error"]
+VALID_SOUNDS = ["done", "ask", "error", "stock_signal"]
 DEFAULT_CUSTOM_DURATION = 6000
 
 # 吹き出しの見切れ対策（長文の自動折り返し）。
