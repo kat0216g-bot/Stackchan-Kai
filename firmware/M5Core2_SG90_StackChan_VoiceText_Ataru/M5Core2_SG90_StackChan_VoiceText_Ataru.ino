@@ -602,8 +602,12 @@ void maybeIdleChatter() {
   avatar.setSpeechText(messages[idx]);
   speechPending = true;
   speechClearTime = millis() + 4000;
-  playVoice(idleVoiceNames[idx]);   // messages[]と同じindexに対応する音声（audioEnabled=OFFなら無音）
-  playMotion(Motion::Tilt);  // 既存モーションの中で一番軽い動きを流用
+  // 待機中アクションは音声ON/OFFと連動させる：OFF中は表示のみ、ONなら音声＋動きも付ける。
+  // （通知（done/ask/error等）のモーションはこれと独立で常に動く。待機中の演出だけを対象とする）
+  if (audioEnabled) {
+    playVoice(idleVoiceNames[idx]);
+    playMotion(Motion::Tilt);  // 既存モーションの中で一番軽い動きを流用
+  }
 }
 
 // 1行分のコマンド文字列を解釈して実行し、応答文字列("OK"または"ERR ...")を返す。
