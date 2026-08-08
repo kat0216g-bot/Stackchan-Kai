@@ -78,7 +78,7 @@ EVENTS = {
 }
 
 VALID_EXPRESSIONS = ["Happy", "Angry", "Sad", "Doubt", "Sleepy", "Neutral"]
-VALID_MOTIONS = ["nod", "tilt", "shake"]
+VALID_MOTIONS = ["nod", "tilt", "shake", "greet", "laugh"]
 # 再生できる音声はCore2に埋め込まれたもののみ（assets/voices/*.wav → voices.h）。
 # フレーズを追加したら tools/generate_voices.py → tools/wav_to_header.py → 再書き込みが必要。
 # なおCore2側はBtnAで音声ON/OFFを切り替えられ、既定はOFF（OFFなら送っても鳴らない）。

@@ -55,15 +55,19 @@ constexpr size_t kJsonDocSize = 512;
 
 // 通知モーション（2026-07-20 実機キャリブレーション結果を反映・第2回で再調整）。
 // センターはX=80°, Y=75°（ホーン取付角のズレにより当初の85°よりさらに調整が必要だった）。
-// 確認済み安全範囲: X 65〜105°(±20), Y 75〜95°(+20、ただし95°付近は当たっている感覚があり要注意)。
+// 確認済み安全範囲: X 65〜105°(±20), Y 50〜95°(-25/+20、ただし95°付近は当たっている感覚があり要注意)。
 // この範囲外は未検証のため使わない。
-enum class Motion { None, Nod, Tilt, Shake };
+// Greet/Laughは公式stack-chan-arduino(Stackchan_servo.cpp)の同名モーションを参考に、
+// このユニットの安全範囲で再現したもの（2026-08-XX）。
+enum class Motion { None, Nod, Tilt, Shake, Greet, Laugh };
 
 bool parseMotion(const char *value, Motion &out) {
   if (!value) return false;
   if (strcmp(value, "nod") == 0)   { out = Motion::Nod;   return true; }
   if (strcmp(value, "tilt") == 0)  { out = Motion::Tilt;  return true; }
   if (strcmp(value, "shake") == 0) { out = Motion::Shake; return true; }
+  if (strcmp(value, "greet") == 0) { out = Motion::Greet; return true; }
+  if (strcmp(value, "laugh") == 0) { out = Motion::Laugh; return true; }
   return false;
 }
 
@@ -92,10 +96,11 @@ struct StackChanCommand {
   String soundName;
 };
 
-// ハード上限（安全マージン込みの絶対クランプ）。実機で65〜105(X)/75〜95(Y)まで確認済み。
+// ハード上限（安全マージン込みの絶対クランプ）。実機で65〜105(X)/50〜95(Y)まで確認済み
+// （Y軸の50〜75は2026-08-XXに追加探索。1〜5°刻みで50まで異音なく確認済み）。
 constexpr int SERVO_X_MIN = 65;
 constexpr int SERVO_X_MAX = 105;
-constexpr int SERVO_Y_MIN = 75;
+constexpr int SERVO_Y_MIN = 50;
 constexpr int SERVO_Y_MAX = 95;
 
 // モーション用の基準角度（すべて実機確認済みの安全範囲内。テスト済み最大値より少し内側を使用）。
@@ -105,6 +110,8 @@ constexpr int NOD_Y_DOWN = 90;    // うなずき: Y方向 75→90→75 (95°付
 constexpr int TILT_X_SIDE = 95;   // 首かしげ: X方向 80→95 で少し保持
 constexpr int SHAKE_X_RIGHT = 95; // ブンブン: X方向 65⇔95 の真の左右往復
 constexpr int SHAKE_X_LEFT = 65;
+constexpr int LAUGH_Y_HIGH = 80;  // 笑う: Y方向 80⇔60 を素早く往復（公式ライブラリと同じ値。実機で確認済み）
+constexpr int LAUGH_Y_LOW = 60;
 
 bool parseExpression(const char *value, m5avatar::Expression &out);
 bool parseCommand(const String &line, StackChanCommand &out, String &error);
@@ -574,6 +581,25 @@ void playMotion(Motion motion) {
         synchronizeAllServosStartAndWaitForAllServosToStop();
       }
       servo_x.setEaseTo(CENTER_X);
+      synchronizeAllServosStartAndWaitForAllServosToStop();
+      break;
+    case Motion::Greet:
+      // 挨拶: Y軸をゆっくり深く1往復（うなずきより深く・ゆっくりでお辞儀のような動き）。
+      servo_y.setEaseTo(NOD_Y_DOWN);
+      synchronizeAllServosStartAndWaitForAllServosToStop();
+      delay(300);
+      servo_y.setEaseTo(CENTER_Y);
+      synchronizeAllServosStartAndWaitForAllServosToStop();
+      break;
+    case Motion::Laugh:
+      // 笑う: Y軸を小刻みに素早く往復させ、体が揺れて笑っている感じを出す。
+      for (int i = 0; i < 5; i++) {
+        servo_y.setEaseTo(LAUGH_Y_HIGH);
+        synchronizeAllServosStartAndWaitForAllServosToStop();
+        servo_y.setEaseTo(LAUGH_Y_LOW);
+        synchronizeAllServosStartAndWaitForAllServosToStop();
+      }
+      servo_y.setEaseTo(CENTER_Y);
       synchronizeAllServosStartAndWaitForAllServosToStop();
       break;
     case Motion::None:
