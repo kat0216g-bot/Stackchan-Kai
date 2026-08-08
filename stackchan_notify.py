@@ -42,7 +42,8 @@ DEFAULT_HOST = "stackchan.local"
 DEFAULT_TCP_PORT = 3300
 DEFAULT_SERIAL_PORT = "COM3"
 DEFAULT_BAUD = 115200
-ACK_TIMEOUT = 3.0   # OK/ERR を待つ秒数（WiFi経由は初回接続に時間がかかることがあるため長め）
+ACK_TIMEOUT = 6.0   # OK/ERR を待つ秒数。laughモーション(約3.6秒)等の長いブロッキング処理を
+                    # 待てるよう余裕を持たせている（モーションはOK応答より先に完了するのを待つ設計）。
 FACE_STACKCHAN = 2  # setupで初期化済みの唯一の顔(faces[2]) / palette 0,1 は未初期化なので使わない
 
 # イベントごとの連続通知クールダウン秒数（このイベントを最後に送ってからN秒未満なら黙ってスキップ）。
@@ -69,10 +70,10 @@ def check_and_update_cooldown(event):
 # イベント種別 -> (表情, セリフ, 表示時間ms, モーション)
 # 表情は .ino の parseExpression が解釈できる6種のみ:
 #   Happy / Angry / Sad / Doubt / Sleepy / Neutral
-# モーションは .ino の parseMotion が解釈できる3種のみ（すべて実機安全確認済み範囲内で動作）:
-#   nod(うなずき) / tilt(首かしげ) / shake(ブンブン)
+# モーションは .ino の parseMotion が解釈できる5種のみ（すべて実機安全確認済み範囲内で動作）:
+#   nod(うなずき) / tilt(首かしげ) / shake(ブンブン) / greet(挨拶) / laugh(笑う)
 EVENTS = {
-    "done":  ("Happy", "終わったよ！見て見て！！", 8000,  "nod"),    # 完了 (Stop)
+    "done":  ("Happy", "終わったよ！見て見て！！", 8000,  "laugh"),  # 完了 (Stop) ※元はnod、laughを試験導入
     "ask":   ("Doubt", "質問があります！",        12000, "tilt"),   # 確認待ち (Notification) 気づくまで長めに
     "error": ("Sad",   "失敗しちゃった、、、",     10000, "shake"),  # エラー
 }
